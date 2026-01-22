@@ -23,3 +23,7 @@ COMPANY_CONSIGNORS = {
     "De Luca Banana Marketing": ["Valley Fresh Brisbane"],
     "Bache Bros Pty Ltd": ["Bache Bros Warehouse"],
 }
+
+#For Kinglake Rules
+CONSIGNEE_COL = "Consignee"
+GROWER_NAME = "Kinglake Farms Pty Ltd (KING BLUES)"

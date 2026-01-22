@@ -4,6 +4,9 @@ from parsers import parse_pdf_filelike
 from excel_ops import get_grower_split
 from allocator import allocate
 from exporter import group_with_blank_lines, to_tab_delimited_with_header
+from pathlib import Path
+from utils import load_consignee_state_map, norm_consignee
+from constants import GROWER_NAME
 
 st.title("Invoice Splitter for MYOB")
 
@@ -34,7 +37,7 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
                                 "Reason": f"Could not read PO from {pdf.name}", "Key": key})
             continue
 
-        grower_split, excel_trays = get_grower_split(uploaded_excel, cust_po, company)
+        grower_split, excel_trays, consignee = get_grower_split(uploaded_excel, cust_po, company)
 
         # Fail 2: no growers (often because consignment trays are zero/missing)
         if not grower_split:
@@ -46,6 +49,36 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
                                 "Reason": f"No growers found in Consignment Summary for PO {cust_po}",
                                 "Key": key})
             continue
+
+        #KINGLAKE State Check
+        has_kinglake = any(
+            str(g).strip().lower() == GROWER_NAME.strip().lower()
+            for g in grower_split.keys()
+        )
+
+        if has_kinglake:
+            if not consignee or not str(consignee).strip():
+                key = _mk_key(company, invoice_no, cust_po)
+                stash[key] = dict(company=company, invoice_no=invoice_no, cust_po=cust_po, invoice_date=invoice_date, charges=charges, pdf_trays=invoice_trays, cons_trays=excel_trays, consignee=consignee)
+                failed_rows.appened({"Company": company, "Invoice No.": invoice_no, "PO No.": cust_po, "Reason":"KING Fruit Outside VIC or Consignee Missing from Table", "key": key})
+                continue
+
+            ckey = norm_consignee(consignee)
+            state = load_consignee_state_map.get(ckey)
+
+            if not state:
+                key = _mk_key(company, invoice_no, cust_po)
+                stash[key] = dict(company=company, invoice_no=invoice_no, cust_po=cust_po, invoice_date=invoice_date, charges=charges, pdf_trays=invoice_trays, cons_trays=excel_trays, consignee=consignee)
+                failed_rows.append({"Company": company, "Invoice No.": invoice_no, "PO No.": cust_po, "Reason": f"KING Fruit Outside VIC or consignee '{consignee}' not found in list", "Key": key})
+                continue
+
+            if state != "VIC":
+                key = _mk_key(company, invoice_no, cust_po)
+                stash[key] = dict(company=company, invoice_no=invoice_no, cust_po=cust_po, invoice_date=invoice_date, charges=charges, pdf_trays=invoice_trays, cons_trays=excel_trays, consignee=consignee, consignee_state=state)
+                failed_rows.append({"Company": company, "Invoice No.": invoice_no, "PO No.": cust_po, "Reason": f"KING Fruit Outside VIC, consignee '{consignee}' is {state}", "Key": key})
+                continue
+
+
 
         inv_ok = isinstance(invoice_trays, (int, float)) and invoice_trays > 0
         ex_ok  = isinstance(excel_trays, (int, float)) and excel_trays > 0
