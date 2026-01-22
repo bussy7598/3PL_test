@@ -10,6 +10,13 @@ from constants import GROWER_NAME
 
 st.title("Invoice Splitter for MYOB")
 
+@st.cache_data
+def _get_consignee_state_map():
+    base_dir = Path(__file__).resolve.parent
+    return load_consignee_state_map(base_dir / "data" / "consignees.xlsx")
+
+consignee_state_map = _get_consignee_state_map
+
 uploaded_pdfs   = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
 uploaded_excel  = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
 uploaded_maps   = st.file_uploader("Upload Account Maps Excel", type=["xlsx"])
@@ -60,11 +67,11 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             if not consignee or not str(consignee).strip():
                 key = _mk_key(company, invoice_no, cust_po)
                 stash[key] = dict(company=company, invoice_no=invoice_no, cust_po=cust_po, invoice_date=invoice_date, charges=charges, pdf_trays=invoice_trays, cons_trays=excel_trays, consignee=consignee)
-                failed_rows.appened({"Company": company, "Invoice No.": invoice_no, "PO No.": cust_po, "Reason":"KING Fruit Outside VIC or Consignee Missing from Table", "key": key})
+                failed_rows.append({"Company": company, "Invoice No.": invoice_no, "PO No.": cust_po, "Reason":"KING Fruit Outside VIC or Consignee Missing from Table", "Key": key})
                 continue
 
             ckey = norm_consignee(consignee)
-            state = load_consignee_state_map.get(ckey)
+            state = consignee_state_map.get(ckey)
 
             if not state:
                 key = _mk_key(company, invoice_no, cust_po)
