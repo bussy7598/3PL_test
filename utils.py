@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Union, Dict
 import pandas as pd
 
 def norm_consignee(s: str) -> str:
@@ -9,7 +10,7 @@ def norm_consignee(s: str) -> str:
    s = re.sub(r"\s+", " ", s)
    return s
 
-def load_consignee_state_map(xlsx_path: str | Path) -> dict[str, str]:
+def load_consignee_state_map(xlsx_path: Union[str, Path]) -> dict[str, str]:
     df = pd.read_excel(xlsx_path, sheet_name="Data")
     df.columns = [str(c).strip() for c in df.columns]
 
