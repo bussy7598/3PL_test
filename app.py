@@ -12,10 +12,10 @@ st.title("Invoice Splitter for MYOB")
 
 @st.cache_data
 def _get_consignee_state_map():
-    base_dir = Path(__file__).resolve.parent
+    base_dir = Path(__file__).resolve().parent
     return load_consignee_state_map(base_dir / "data" / "consignees.xlsx")
 
-consignee_state_map = _get_consignee_state_map
+consignee_state_map = _get_consignee_state_map()
 
 uploaded_pdfs   = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
 uploaded_excel  = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
