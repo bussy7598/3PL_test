@@ -25,17 +25,13 @@ def _mk_key(company, invoice_no, cust_po):
     return f"{str(company).strip()}|{str(invoice_no).strip()}|{str(cust_po).strip()}"
 
 
-if "failed_payloads" not in st.session_state:
-    st.session_state.failed_payloads = {}
-
-
 uploaded_pdfs = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
 uploaded_excel = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
 uploaded_maps = st.file_uploader("Upload Account Maps Excel", type=["xlsx"])
 
 if uploaded_pdfs and uploaded_excel and uploaded_maps:
     mapping_df = pd.read_excel(uploaded_maps)
-    all_rows, failed_rows, stash = [], [], {}
+    all_rows, failed_rows = [], []
 
     for pdf in uploaded_pdfs:
         company, (invoice_no, cust_po, invoice_date, charges, invoice_trays) = parse_pdf_filelike(pdf)
@@ -43,14 +39,9 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
         # Fail 1: missing PO
         if not cust_po:
             key = _mk_key(company, invoice_no, cust_po or "")
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                pdf_trays=invoice_trays
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                "Reason": f"Could not read PO from {pdf.name}", "Key": key
+                "Reason": "Could not read PO", "Key": key
             })
             continue
 
@@ -59,15 +50,9 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
         # Fail 2: no growers
         if not grower_split:
             key = _mk_key(company, invoice_no, cust_po)
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                pdf_trays=invoice_trays, cons_trays=excel_trays,
-                consignee=consignee
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                "Reason": f"No growers found in Consignment Summary for PO {cust_po}",
+                "Reason": "No Growers Found in FT",
                 "Key": key
             })
             continue
@@ -82,15 +67,9 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             # If consignee missing, block (safer)
             if not consignee or not str(consignee).strip():
                 key = _mk_key(company, invoice_no, cust_po)
-                stash[key] = dict(
-                    company=company, invoice_no=invoice_no, cust_po=cust_po,
-                    invoice_date=invoice_date, charges=charges,
-                    pdf_trays=invoice_trays, cons_trays=excel_trays,
-                    consignee=consignee
-                )
                 failed_rows.append({
                     "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                    "Reason": "KINGLAKE Fruit Outside of VIC — consignee missing in Consignment Summary",
+                    "Reason": "Consignee not in FT",
                     "Key": key
                 })
                 continue
@@ -101,30 +80,18 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             # If not found in list, block (safer)
             if not state:
                 key = _mk_key(company, invoice_no, cust_po)
-                stash[key] = dict(
-                    company=company, invoice_no=invoice_no, cust_po=cust_po,
-                    invoice_date=invoice_date, charges=charges,
-                    pdf_trays=invoice_trays, cons_trays=excel_trays,
-                    consignee=consignee
-                )
                 failed_rows.append({
                     "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                    "Reason": f"KINGLAKE Fruit Outside of VIC — consignee '{consignee}' not found in list",
+                    "Reason": "Consignee not in list",
                     "Key": key
                 })
                 continue
 
             if state != "VIC":
                 key = _mk_key(company, invoice_no, cust_po)
-                stash[key] = dict(
-                    company=company, invoice_no=invoice_no, cust_po=cust_po,
-                    invoice_date=invoice_date, charges=charges,
-                    pdf_trays=invoice_trays, cons_trays=excel_trays,
-                    consignee=consignee, consignee_state=state
-                )
                 failed_rows.append({
                     "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                    "Reason": f"KINGLAKE Fruit Outside of VIC — consignee '{consignee}' is {state}",
+                    "Reason": "KING Outside of VIC",
                     "Key": key
                 })
                 continue
@@ -136,46 +103,27 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
         # Fail 3: invoice trays missing
         if not inv_ok:
             key = _mk_key(company, invoice_no, cust_po)
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                grower_split=grower_split, cons_trays=excel_trays,
-                consignee=consignee
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                "Reason": "Could not determine tray count on the invoice", "Key": key
+                "Reason": "Invoice Tray Error", "Key": key
             })
             continue
 
         # Fail 4: consignment trays missing
         if not ex_ok:
             key = _mk_key(company, invoice_no, cust_po)
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                pdf_trays=invoice_trays, cons_trays=excel_trays,
-                consignee=consignee
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                "Reason": "Consignment Summary tray total is missing/zero", "Key": key
+                "Reason": "0 FT Trays", "Key": key
             })
             continue
 
         # Fail 5: tray mismatch
         if int(round(invoice_trays)) != int(round(excel_trays)):
             key = _mk_key(company, invoice_no, cust_po)
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                pdf_trays=invoice_trays, cons_trays=excel_trays,
-                consignee=consignee
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
-                "Reason": f"Tray mismatch: Invoice has {int(round(invoice_trays))}, "
-                          f"Consignment has {int(round(excel_trays))}",
+                "Reason": f"Mismatch, {int(round(invoice_trays))} v {int(round(excel_trays))}",
                 "Key": key
             })
             continue
@@ -184,11 +132,6 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
         rows, fail_reason = allocate(invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df)
         if fail_reason:
             key = _mk_key(company, invoice_no, cust_po)
-            stash[key] = dict(
-                company=company, invoice_no=invoice_no, cust_po=cust_po,
-                invoice_date=invoice_date, charges=charges,
-                consignee=consignee
-            )
             failed_rows.append({
                 "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
                 "Reason": fail_reason, "Key": key
@@ -196,8 +139,6 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             continue
 
         all_rows.extend(rows)
-
-    st.session_state.failed_payloads = stash
 
     # Success table + download
     if all_rows:
@@ -210,141 +151,6 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
     else:
         st.info("No invoices were successfully processed.")
 
-    # -------------------- Dynamic single fix panel --------------------
     if failed_rows:
-        st.subheader("Failed Invoices (with reasons)")
-        failed_df = pd.DataFrame(failed_rows)
-        st.dataframe(failed_df)
-
-        st.markdown("### Fix & Reprocess (dynamic form)")
-        labels = {
-            f"{r['Company']} | Inv {r['Invoice No.']} | PO {r['PO No.']} — {r['Reason']}": r["Key"]
-            for _, r in failed_df.iterrows() if "Key" in r
-        }
-
-        if labels:
-            label_sel = st.selectbox("Choose an invoice to fix:", list(labels.keys()))
-            key = labels[label_sel]
-            payload = st.session_state.failed_payloads.get(key, {})
-            reason = next((r["Reason"] for r in failed_rows if r.get("Key") == key), "").lower()
-
-            # 1) Missing PO
-            if "could not read po" in reason:
-                new_po = st.text_input("Enter PO (e.g., OZG12345)")
-                if st.button("Reprocess with this PO"):
-                    if not new_po.strip():
-                        st.error("Please enter a PO.")
-                    else:
-                        grower_split2, excel_trays2, _consignee2 = get_grower_split(
-                            uploaded_excel, new_po.strip(), payload["company"]
-                        )
-                        if not grower_split2:
-                            st.error("Still no growers found for this PO.")
-                        else:
-                            inv_trays = payload.get("pdf_trays")
-                            inv_ok2 = isinstance(inv_trays, (int, float)) and inv_trays > 0
-                            if not inv_ok2:
-                                st.error("The invoice tray count is unreadable. Use the tray fix mode.")
-                            elif int(round(inv_trays)) != int(round(excel_trays2)):
-                                st.error(
-                                    f"Tray mismatch: Invoice has {int(round(inv_trays))}, "
-                                    f"Consignment has {int(round(excel_trays2))}."
-                                )
-                            else:
-                                rows2, fail_reason2 = allocate(
-                                    payload["invoice_no"], new_po.strip(), payload["charges"],
-                                    grower_split2, payload["company"], payload["invoice_date"], mapping_df
-                                )
-                                if fail_reason2:
-                                    st.error(f"Still failing: {fail_reason2}")
-                                else:
-                                    df_fix = pd.DataFrame(rows2)
-                                    df_fix_exp = group_with_blank_lines(df_fix, "Supplier Invoice No.")
-                                    st.subheader("Reprocessed Invoice")
-                                    st.dataframe(df_fix_exp)
-                                    txt2 = to_tab_delimited_with_header(df_fix_exp)
-                                    st.download_button(
-                                        "Download MYOB Import (This Invoice Only)",
-                                        txt2, f"myob_import_{payload['invoice_no']}.txt", "text/plain"
-                                    )
-
-            # 2) Unreadable trays on PDF
-            elif "determine tray count" in reason:
-                cons_trays = int(round(payload.get("cons_trays", payload.get("excel_trays", 0)) or 0))
-                tray_override = st.number_input(
-                    f"Enter tray count seen on the invoice (must equal consignment trays = {cons_trays})",
-                    min_value=1, step=1
-                )
-                if st.button("Reprocess with this tray count"):
-                    if tray_override != cons_trays:
-                        st.error(f"Tray mismatch with Consignment: override {tray_override} vs {cons_trays}")
-                    else:
-                        rows2, fail_reason2 = allocate(
-                            payload["invoice_no"], payload["cust_po"], payload["charges"],
-                            payload.get("grower_split", {}), payload["company"], payload["invoice_date"],
-                            mapping_df
-                        )
-                        if fail_reason2:
-                            st.error(f"Still failing: {fail_reason2}")
-                        else:
-                            df_fix = pd.DataFrame(rows2)
-                            df_fix_exp = group_with_blank_lines(df_fix, "Supplier Invoice No.")
-                            st.subheader("Reprocessed Invoice")
-                            st.dataframe(df_fix_exp)
-                            txt2 = to_tab_delimited_with_header(df_fix_exp)
-                            st.download_button(
-                                "Download MYOB Import (This Invoice Only)",
-                                txt2, f"myob_import_{payload['invoice_no']}.txt", "text/plain"
-                            )
-
-            # 3) Tray mismatch OR no growers / consignment zero
-            else:
-                pdf_trays = int(round(payload.get("pdf_trays") or 0))
-                st.caption(f"PDF tray count detected: {pdf_trays if pdf_trays else 'not detected'}")
-                if pdf_trays <= 0:
-                    pdf_trays = st.number_input(
-                        "Enter total tray count for this invoice (from PDF)", min_value=1, step=1
-                    )
-
-                st.write("Enter one or more supplier lines as `Supplier Name = trays`. Example:")
-                st.code("Emerald Greenhouse Supplies Pty Ltd = 120\nAnother Supplier = 80")
-                multiline = st.text_area("Suppliers and trays (one per line)")
-                if st.button("Reprocess with these suppliers"):
-                    splits_raw = []
-                    for line in multiline.splitlines():
-                        if "=" in line:
-                            name, qty = line.split("=", 1)
-                            name = name.strip()
-                            try:
-                                qty = int(float(qty.strip()))
-                            except:
-                                qty = -1
-                            if name and qty > 0:
-                                splits_raw.append((name, qty))
-
-                    if not splits_raw:
-                        st.error("Please enter at least one valid `Supplier = trays` line.")
-                    else:
-                        total_entered = sum(q for _, q in splits_raw)
-                        if total_entered != pdf_trays:
-                            st.error(
-                                f"Sum of entered trays ({total_entered}) must equal PDF tray count ({pdf_trays})."
-                            )
-                        else:
-                            split_override = {name: qty / total_entered for name, qty in splits_raw}
-                            rows2, fail_reason2 = allocate(
-                                payload["invoice_no"], payload["cust_po"], payload["charges"],
-                                split_override, payload["company"], payload["invoice_date"], mapping_df
-                            )
-                            if fail_reason2:
-                                st.error(f"Still failing: {fail_reason2}")
-                            else:
-                                df_fix = pd.DataFrame(rows2)
-                                df_fix_exp = group_with_blank_lines(df_fix, "Supplier Invoice No.")
-                                st.subheader("Reprocessed Invoice (Manual Split)")
-                                st.dataframe(df_fix_exp)
-                                txt2 = to_tab_delimited_with_header(df_fix_exp)
-                                st.download_button(
-                                    "Download MYOB Import (This Invoice Only)",
-                                    txt2, f"myob_import_{payload['invoice_no']}.txt", "text/plain"
-                                )
+        st.subheader("Failed Invoices (With Reasons)")
+        st.dataframe(pd.DataFrame(failed_rows))

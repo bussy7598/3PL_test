@@ -11,7 +11,7 @@ def allocate(invoice_no, cust_po, charges, grower_split, company, invoice_date, 
         hit = mapping_df[mapping_df["Supplier"].str.strip().str.lower() == grower.strip().lower()]
         if hit.empty: missing.append(grower)
     if missing:
-        return [], f"No account mapping found for growers: {', '.join(missing)}"
+        return [], f"{', '.join(missing)} not in mapping"
 
     # Build rows
     for grower, pct in grower_split.items():
@@ -42,6 +42,6 @@ def allocate(invoice_no, cust_po, charges, grower_split, company, invoice_date, 
             })
 
     if not rows:
-        return [], "No charge lines found (Logistics/Freight) on invoice"
+        return [], "No Logistics or Freight"
 
     return rows, None
