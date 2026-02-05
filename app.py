@@ -214,7 +214,7 @@ if failed_rows:
     if "failed_actions_df" not in st.session_state:
         st.session_state.failed_actions_df = display_df.copy()
     elif len(st.session_state.faild_actions_df) != len(display_df):
-            st.session_state.faailed_actions_df = display_df.copy()
+        st.session_state.failed_actions_df = display_df.copy()
 
     edited = st.data_editor(
         st.session_state.failed_actions_df,
@@ -225,12 +225,6 @@ if failed_rows:
     )
 
     st.session_state.failed_actions_df = edited.copy()
-
-    edited_with_key = edited.copy()
-    edited_with_key["Key"] = failed_df["Key"].values
-
-    repack_keys = edited_with_key.loc[edited_with_key["Repack"] == True, "Key"].tolist()
-    reprocess_keys = edited_with_key.loc[edited_with_key["Reprocess"] == True, "Key"].tolist()
 
     # Re-attach Key by row order (safe as long as user doesn't sort in editor)
     edited_with_key = edited.copy()
@@ -253,12 +247,14 @@ if failed_rows:
     if st.session_state.get("show_repack_setup", False):
         st.subheader("Repack Setup")
 
-        if not repack_keys:
+
+        keys_for_setup = st.session_state.get("repack_keys_snapshot", repack_keys)
+        if not keys_for_setup:
             st.info("No Invoices Selected")
         else:
             shown_any = False
 
-            for k in repack_keys:
+            for k in keys_for_setup:
                 meta = st.session_state.invoice_meta.get(k)
                 if not meta:
                     continue
