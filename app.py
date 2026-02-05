@@ -153,4 +153,10 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
 
     if failed_rows:
         st.subheader("Failed Invoices (With Reasons)")
-        st.dataframe(pd.DataFrame(failed_rows))
+        
+        failed_df = pd.DataFrame(failed_rows)
+
+        st.dataframe(
+            failed_df.drop(columns=["Key"], errors="ignore"),
+            use_container_width=True
+        )
