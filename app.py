@@ -24,6 +24,15 @@ consignee_state_map = _get_consignee_state_map()
 def _mk_key(company, invoice_no, cust_po):
     return f"{str(company).strip()}|{str(invoice_no).strip()}|{str(cust_po).strip()}"
 
+if "invoice_meta" not in st.session_state:
+    st.session_state.invoice_meta = {}
+
+if "repack_growers" not in st.session_state:
+    st.session_state.repack_growers = {}
+
+if "show_repack_setup" not in st.session_state:
+    st.session_state.show_repack_setup = False
+
 all_rows = []
 failed_rows = []
 
@@ -49,6 +58,15 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             continue
 
         grower_split, excel_trays, consignee = get_grower_split(uploaded_excel, cust_po, company)
+
+        key = _mk_key(company, invoice_no, cust_po)
+
+        st.session_state.invoice_meta[key] = {
+            "Comnpany": company,
+            "Invoice No.": invoice_no,
+            "PO No.": cust_po,
+            "Growers": sorted([str(g).strip() for g in grower_split.keys()]),
+        }
 
         # Fail 2: no growers
         if not grower_split:
@@ -188,8 +206,7 @@ if failed_rows:
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Apply Repack (stub)"):
-            st.info(f"Would repack {len(repack_keys)} invoice(s): {repack_keys}")
-            # TODO: store override per Key
+            st.session_state.show_repack_setup = True
 
     with c2:
         if st.button("Apply Reprocess (stub)"):
