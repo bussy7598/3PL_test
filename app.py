@@ -211,12 +211,27 @@ if failed_rows:
     if "Reprocess" not in display_df.columns:
         display_df["Reprocess"] = False
 
+    if "failed_actions_df" not in st.session_state:
+        st.session_state.failed_actions_df = display_df.copy()
+    else:
+        if len(st.session_state.faild_actions_df) != len(display_df):
+            st.session_state.faailed_actions_df = display_df.copy()
+
     edited = st.data_editor(
-        display_df,
+        st.session_state.failed_actions_df,
         use_container_width=True,
         hide_index=True,
-        disabled=["Company", "Invoice No.", "PO No.", "Reason"],  # only actions editable
+        disabled=["Company", "Invoice No.", "PO No.", "Reason"],
+        key="failed_actions_editor",
     )
+
+    st.session_state.failed_actions_df = edited.copy()
+
+    edited_with_key = edited.copy()
+    edited_with_key["Key"] = failed_df["Key"].values
+
+    repack_keys = edited_with_key.loc[edited_with_key["Repack"] == True, "Key"].tolist()
+    reprocess_keys = edited_with_key.loc[edited_with_key["Reprocess"] == True, "Key"].tolist()
 
     # Re-attach Key by row order (safe as long as user doesn't sort in editor)
     edited_with_key = edited.copy()
@@ -227,8 +242,9 @@ if failed_rows:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Apply Repack (stub)"):
+        if st.button("Apply Repack"):
             st.session_state.show_repack_setup = True
+            st.session_state.repack_keys_snapshot = repack_keys
 
     with c2:
         if st.button("Apply Reprocess (stub)"):
