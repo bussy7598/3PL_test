@@ -160,3 +160,29 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
             failed_df.drop(columns=["Key"], errors="ignore"),
             use_container_width=True
         )
+
+    st.markdown("### Actions")
+
+    options = {
+        f"{r['Company']} | Inv {r['Invoice No.']} | PO {r['PO No.']} | {r['Reason']}": r["key"]
+        for r in failed_rows
+    }
+
+    selected_label = st.selectbox(
+        "Select a failed invoice",
+        list(options.key())
+    )
+
+    selected_key = options[selected_label]
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("Repack"):
+            st.info(f"Repack Clicked for {selected_key}")
+            # TODO: store repack override (V2)
+
+    with c2:
+        if st.button("Reprocess"):
+            st.info(f"Reprocess clicked for {selected_key}")
+            # TODO: queue invoice for reprocess (V2)
