@@ -151,38 +151,44 @@ if uploaded_pdfs and uploaded_excel and uploaded_maps:
     else:
         st.info("No invoices were successfully processed.")
 
-    if failed_rows:
-        st.subheader("Failed Invoices (With Reasons)")
-        
-        failed_df = pd.DataFrame(failed_rows)
+if failed_rows:
+    st.subheader("Failed Invoices (With Reasons)")
 
-        st.dataframe(
-            failed_df.drop(columns=["Key"], errors="ignore"),
-            use_container_width=True
-        )
+    failed_df = pd.DataFrame(failed_rows)
 
-    st.markdown("### Actions")
+    # Hide Key from display, but keep it in the data we carry around
+    display_df = failed_df.drop(columns=["Key"], errors="ignore").copy()
 
-    options = {
-        f"{r['Company']} | Inv {r['Invoice No.']} | PO {r['PO No.']} | {r['Reason']}": r["key"]
-        for r in failed_rows
-    }
+    # Add "Actions" columns on the end (editable checkboxes)
+    if "Repack" not in display_df.columns:
+        display_df["Repack"] = False
+    if "Reprocess" not in display_df.columns:
+        display_df["Reprocess"] = False
 
-    selected_label = st.selectbox(
-        "Select a failed invoice",
-        list(options.key())
+    edited = st.data_editor(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Company", "Invoice No.", "PO No.", "Reason"],  # only actions editable
     )
 
-    selected_key = options[selected_label]
+    # --- Stubs for now: show what would be actioned ---
+    # Re-attach Key by joining back to the original DF by row order
+    # (safe as long as you don't sort the editor)
+    edited_with_key = edited.copy()
+    if "Key" in failed_df.columns:
+        edited_with_key["Key"] = failed_df["Key"].values
+
+    repack_keys = edited_with_key.loc[edited_with_key["Repack"] == True, "Key"].tolist() if "Key" in edited_with_key.columns else []
+    reprocess_keys = edited_with_key.loc[edited_with_key["Reprocess"] == True, "Key"].tolist() if "Key" in edited_with_key.columns else []
 
     c1, c2 = st.columns(2)
-
     with c1:
-        if st.button("Repack"):
-            st.info(f"Repack Clicked for {selected_key}")
-            # TODO: store repack override (V2)
+        if st.button("Apply Repack (stub)"):
+            st.info(f"Would repack {len(repack_keys)} invoice(s): {repack_keys}")
+            # TODO: store override per Key
 
     with c2:
-        if st.button("Reprocess"):
-            st.info(f"Reprocess clicked for {selected_key}")
-            # TODO: queue invoice for reprocess (V2)
+        if st.button("Apply Reprocess (stub)"):
+            st.info(f"Would reprocess {len(reprocess_keys)} invoice(s): {reprocess_keys}")
+            # TODO: queue these Keys for reprocess
