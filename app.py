@@ -232,3 +232,30 @@ if failed_rows:
         if st.button("Apply Reprocess (stub)"):
             st.info(f"Would reprocess {len(reprocess_keys)} invoice(s): {reprocess_keys}")
             # TODO: queue these Keys for reprocess
+    
+    if st.session_state.get("show_repack_setup", False):
+        st.subheader("Repack Setup")
+
+        if not repack_keys:
+            st.info("No Invoices Selected")
+        else:
+            shown_any = False
+
+            for k in repack_keys:
+                meta = st.session_state.invoice_meta.get(k)
+                if not meta:
+                    continue
+
+                growers = meta.get("Growers", [])
+                if len(growers) <= 1:
+                    continue
+
+                shown_any = True
+                st.markdown(
+                    f"**{meta.get('Company','')} | Inv {meta.get('Invoice No.','')} | PO {meta.get('PO No.','')}**"
+                )
+                st.caption("Growers: "+ ", ".join(growers))
+                st.divider()
+
+            if not shown_any:
+                st.info("Invoices only have one grower")
