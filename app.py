@@ -247,14 +247,25 @@ if failed_rows:
                     continue
 
                 growers = meta.get("Growers", [])
-                if len(growers) <= 1:
+                if len(growers) == 1:
+                    st.session_state.repack_growers[k] = {growers[0]}
+                    st.caption(f"Auto repack: {growers[0]}")
+                    shown_any = True
                     continue
 
                 shown_any = True
                 st.markdown(
                     f"**{meta.get('Company','')} | Inv {meta.get('Invoice No.','')} | PO {meta.get('PO No.','')}**"
                 )
-                st.caption("Growers: "+ ", ".join(growers))
+                default = list(st.session_state.repack_growers.get(k, set()))
+                selected = st.multiselect(
+                    "Select Repack Growers",
+                    options=growers,
+                    default=default,
+                    key=f"repack_select_{k}",
+                )
+                st.session_state.repack_growers[k] = set(selected)
+                st.caption("Repack growers: "+(", ".join(selected)if selected else "None selected"))
                 st.divider()
 
             if not shown_any:
