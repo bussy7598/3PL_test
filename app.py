@@ -213,8 +213,7 @@ if failed_rows:
 
     if "failed_actions_df" not in st.session_state:
         st.session_state.failed_actions_df = display_df.copy()
-    else:
-        if len(st.session_state.faild_actions_df) != len(display_df):
+    elif len(st.session_state.faild_actions_df) != len(display_df):
             st.session_state.faailed_actions_df = display_df.copy()
 
     edited = st.data_editor(
