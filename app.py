@@ -161,8 +161,10 @@ if run and uploaded_pdfs and uploaded_excel and uploaded_maps:
                 })
                 continue
 
+            repack_set = st.session_state.repack_growers.get(key, set())
+
             # Allocation
-            rows, fail_reason = allocate(invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df)
+            rows, fail_reason = allocate(invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df, repack_set)
             if fail_reason:
                 failed_rows.append({
                     "Company": company, "Invoice No.": invoice_no, "PO No.": cust_po,
