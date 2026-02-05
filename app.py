@@ -24,6 +24,9 @@ consignee_state_map = _get_consignee_state_map()
 def _mk_key(company, invoice_no, cust_po):
     return f"{str(company).strip()}|{str(invoice_no).strip()}|{str(cust_po).strip()}"
 
+all_rows = []
+failed_rows = []
+
 
 uploaded_pdfs = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
 uploaded_excel = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
