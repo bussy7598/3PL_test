@@ -50,8 +50,13 @@ if "repack_allocations" not in st.session_state:
     # key -> list[{"Grower": str, "Trays": float, "Repack": bool}]
     st.session_state.repack_allocations = {}
 
-if "show_repack_setup" not in st.session_state:
-    st.session_state.show_repack_setup = False
+if "manual_jobs" not in st.session_state:
+    # key -> {"intent": "repack"|"reprocess"}
+    st.session_state.manual_jobs = {}
+
+if "manual_charge_toggles" not in st.session_state:
+    # key -> {"logistics": bool, "freight": bool} controls which charge types use repack accounts for repack growers
+    st.session_state.manual_charge_toggles = {}
 
 # Store results so UI edits don't re-run heavy parsing
 if "all_rows" not in st.session_state:
@@ -322,7 +327,7 @@ def _save_allocations_rows(k: str, rows: list[dict]):
 
 
 
-def _process_repack_keys(keys_for_setup):
+def _process_manual_keys(keys_for_setup):
     mapping_df = st.session_state.mapping_df
     if mapping_df is None or mapping_df.empty:
         st.error("No Account Maps loaded in session. Click 'Run Processing' again with the maps file.")
@@ -368,17 +373,24 @@ def _process_repack_keys(keys_for_setup):
         grower_split = {r["Grower"]: float(r["Trays"]) / total for r in alloc_df.to_dict("records")}
         repack_set = set(alloc_df[alloc_df["Repack"]]["Grower"].tolist()) if "Repack" in alloc_df.columns else set()
 
+        repack_types = set()
+        toggles = st.session_state.manual_charge_toggles.get(k, {"logistics": True, "freight": True})
+        if toggles.get("logistics"):
+            repack_types.add("Logistics")
+        if toggles.get("freight"):
+            repack_types.add("Freight")
+
         rows, fail_reason = allocate(
-            invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df, repack_set
+            invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df, repack_set, repack_types
         )
         if fail_reason:
             # Keep it failed, but show why
-            st.warning(f"Repack failed for {invoice_no} / {cust_po}: {fail_reason}")
+            st.warning(f"Manual allocation failed for {invoice_no} / {cust_po}: {fail_reason}")
             skipped += 1
             continue
 
         # Don't double-add rows if user clicks twice
-        repack_key = f"REPACK|{k}"
+        repack_key = f"MANUAL|{k}"
         if repack_key in st.session_state.processed_keys:
             skipped += 1
             continue
@@ -391,9 +403,9 @@ def _process_repack_keys(keys_for_setup):
         st.session_state.all_rows = (st.session_state.all_rows or []) + new_rows
 
     if processed:
-        st.success(f"Processed {processed} repack invoice(s).")
+        st.success(f"Processed {processed} invoice(s) via manual allocation.")
     if skipped and not processed:
-        st.info("No repacks were processed (missing allocations, missing PO, or mapping issues).")
+        st.info("No invoices were processed (missing allocations, missing PO, or mapping issues).")
 
 
 # -------------------------
@@ -468,12 +480,25 @@ with left:
 
          b1, b2 = st.columns(2)
          with b1:
-             if st.button("Apply Repack"):
-                 st.session_state.show_repack_setup = True
-                 st.session_state.repack_keys_snapshot = repack_keys
+             if st.button("Apply Repack → Manual Allocation"):
+                 for k in repack_keys:
+                     st.session_state.manual_jobs[k] = {"intent": "repack"}
+                     st.session_state.manual_charge_toggles.setdefault(k, {"logistics": True, "freight": True})
+                 # Ensure allocations exist
+                 for k in repack_keys:
+                     if k not in st.session_state.repack_allocations:
+                         st.session_state.repack_allocations[k] = _default_repack_allocations_for_key(k)
+                 st.rerun()
          with b2:
-             if st.button("Apply Reprocess (stub)"):
-                 st.info(f"Would reprocess {len(reprocess_keys)} invoice(s): {reprocess_keys}")
+             if st.button("Apply Reprocess → Manual Allocation"):
+                 for k in reprocess_keys:
+                     st.session_state.manual_jobs[k] = {"intent": "reprocess"}
+                     # Default: no repack routing unless user ticks it
+                     st.session_state.manual_charge_toggles.setdefault(k, {"logistics": False, "freight": False})
+                 for k in reprocess_keys:
+                     if k not in st.session_state.repack_allocations:
+                         st.session_state.repack_allocations[k] = _default_repack_allocations_for_key(k)
+                 st.rerun()
 
 # -------------------------
 # RIGHT: Repack + Reprocess setup panels
@@ -482,15 +507,16 @@ with right:
      # -------------------------
      # Repack Setup + processing
      # -------------------------
-     if st.session_state.get("show_repack_setup", False):
-         st.subheader("Repack Setup")
+     if st.session_state.get("manual_jobs"):
+         st.subheader("Manual Allocation Setup")
 
-         keys_for_setup = st.session_state.get("repack_keys_snapshot", repack_keys)
+         # keys the user has queued for manual allocation
+         keys_for_setup = list(st.session_state.manual_jobs.keys())
          if not keys_for_setup:
-             st.info("No Invoices Selected")
+             st.info("No invoices queued for manual allocation. Select invoices in the Failed table and click Apply.")
          else:
              st.caption("Enter tray counts per grower. Percentages are calculated as trays / total trays entered.")
-             st.caption("Tick 'Repack' for growers that must hit the repack accounts. Unticked growers will use normal logistics/freight accounts.")
+             st.caption("Tick 'Repack' per grower to route selected charge types to repack accounts. Unticked growers use normal accounts.")
 
              for k in keys_for_setup:
                  meta = st.session_state.invoice_meta.get(k, {})
@@ -503,6 +529,13 @@ with right:
                  inv_trays = meta.get("Invoice Trays", None)
                  if isinstance(inv_trays, (int, float)) and inv_trays:
                      st.caption(f"Invoice trays parsed: {int(round(inv_trays))}")
+
+                 # Invoice-level controls: which charge types use repack accounts (for repack growers)
+                 toggles = st.session_state.manual_charge_toggles.setdefault(k, {"logistics": True, "freight": True})
+                 t1, t2, _tsp = st.columns([1,1,2])
+                 toggles["logistics"] = t1.checkbox("Repack affects Logistics", value=bool(toggles.get("logistics", True)), key=f"tog_{k}_log")
+                 toggles["freight"]   = t2.checkbox("Repack affects Freight", value=bool(toggles.get("freight", True)), key=f"tog_{k}_fre")
+                 st.session_state.manual_charge_toggles[k] = toggles
 
                  # Grower dropdown options: use ALL growers from Account Maps (Supplier column)
                  grower_options = st.session_state.get("grower_options") or []
@@ -585,5 +618,5 @@ with right:
                  else:
                      st.info("Add growers and tray counts above (rows with 0 trays are ignored).")
 
-             if st.button("Process Repacks → Add to MYOB Export", type="primary"):
-                 _process_repack_keys(keys_for_setup)
+             if st.button("Process Manual Allocations → Add to MYOB Export", type="primary"):
+                 _process_manual_keys(keys_for_setup)
