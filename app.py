@@ -10,6 +10,7 @@ from utils import load_consignee_state_map, norm_consignee
 from constants import GROWER_NAME
 
 
+
 st.set_page_config(page_title="Invoice Splitter for MYOB", layout="wide")
 
 st.markdown("""
@@ -79,8 +80,35 @@ with u1:
     uploaded_pdfs = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
 with u2:
     uploaded_excel = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
+
 with u3:
     uploaded_maps = st.file_uploader("Upload Account Maps Excel", type=["xlsx"])
+
+# Build grower dropdown options directly from Account Maps (Supplier column)
+if uploaded_maps is not None:
+    try:
+        # Only reload if different file (name/size token)
+        token = (getattr(uploaded_maps, "name", None), getattr(uploaded_maps, "size", None))
+        if st.session_state.get("_maps_token") != token:
+            mapping_df_preview = pd.read_excel(uploaded_maps)
+            st.session_state.mapping_df = mapping_df_preview
+            st.session_state._maps_token = token
+        mapping_df_for_opts = st.session_state.mapping_df
+        if mapping_df_for_opts is not None and "Supplier" in mapping_df_for_opts.columns:
+            opts = (
+                mapping_df_for_opts["Supplier"]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .loc[lambda s: s.ne("") & s.str.lower().ne("nan") & s.str.lower().ne("none")]
+                .unique()
+                .tolist()
+            )
+            st.session_state.grower_options = sorted(opts, key=str.lower)
+        else:
+            st.session_state.grower_options = []
+    except Exception:
+        st.session_state.grower_options = []
 
 run = st.button(
     "Run Processing",
@@ -93,8 +121,8 @@ run = st.button(
 # Processing (ONLY when Run clicked)
 # -------------------------
 if run and uploaded_pdfs and uploaded_excel and uploaded_maps:
-    mapping_df = pd.read_excel(uploaded_maps)
-    st.session_state.mapping_df = mapping_df
+    # mapping_df was already loaded from uploaded Account Maps
+    mapping_df = st.session_state.mapping_df
 
     all_rows, failed_rows = [], []
 
@@ -476,10 +504,8 @@ with right:
                  if isinstance(inv_trays, (int, float)) and inv_trays:
                      st.caption(f"Invoice trays parsed: {int(round(inv_trays))}")
 
-                 # Grower dropdown options (prefer growers found on this PO, fall back to all growers seen)
-                 grower_options = meta.get("Growers") or []
-                 if not grower_options:
-                     grower_options = sorted(st.session_state.get("all_growers", set()))
+                 # Grower dropdown options: use ALL growers from Account Maps (Supplier column)
+                 grower_options = st.session_state.get("grower_options") or []
                  # Ensure allocations exist in session
                  if k not in st.session_state.repack_allocations:
                      st.session_state.repack_allocations[k] = _default_repack_allocations_for_key(k)
