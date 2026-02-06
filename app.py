@@ -212,26 +212,35 @@ if failed_rows:
         display_df["Reprocess"] = False
 
     if "failed_actions_df" not in st.session_state:
-        st.session_state.failed_actions_df = display_df.copy()
-    elif len(st.session_state.failed_actions_df) != len(display_df):
-        st.session_state.failed_actions_df = display_df.copy()
+        st.session_state.failed_actions = {}
+
+    keys = failed_df["Key"].tolist()
+
+    display_df["Repack"] = [
+        st.session_state.failed_actions.get(k, {}).get("Repack", False)
+        for k in keys
+    ]
+    display_df["Reprocess"] = [
+        st.session_state.failed_actions.get(k, {}).get("Reprocess", False)
+        for k in keys
+    ]
 
     edited = st.data_editor(
-        st.session_state.failed_actions_df,
+        display_df,
         use_container_width=True,
         hide_index=True,
         disabled=["Company", "Invoice No.", "PO No.", "Reason"],
-        key="failed_actions_editor",
+        key="failed_actions_editor"
     )
 
-    st.session_state.failed_actions_df = edited.copy()
+    for i, k in enumerate(keys):
+        st.session_state.failed_actions[k] = {
+            "Repack": bool(edited.loc[i, "Repack"]),
+            "Reprocess": bool(edited.loc[i, "Reprocess"]),
+        }
 
-    # Re-attach Key by row order (safe as long as user doesn't sort in editor)
-    edited_with_key = edited.copy()
-    edited_with_key["Key"] = failed_df["Key"].values
-
-    repack_keys = edited_with_key.loc[edited_with_key["Repack"] == True, "Key"].tolist()
-    reprocess_keys = edited_with_key.loc[edited_with_key["Reprocess"] == True, "Key"].tolist()
+    repack_keys = [k for k in keys if st.session_state.failed_actions[k]["Repack"]]
+    reprocess_keys = [k for k in keys if st.session_state.failed_actions[k]["Reprocess"]]
 
     c1, c2 = st.columns(2)
     with c1:
