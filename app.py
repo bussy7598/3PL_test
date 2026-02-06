@@ -9,6 +9,11 @@ from exporter import group_with_blank_lines, to_tab_delimited_with_header
 from utils import load_consignee_state_map, norm_consignee
 from constants import GROWER_NAME
 
+st.set_page_config(
+    page_title = "Invoice Splitter For MYOB",
+    layout="wide",
+)
+
 st.title("Invoice Splitter for MYOB")
 
 
