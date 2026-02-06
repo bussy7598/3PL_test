@@ -58,12 +58,16 @@ if "processed_keys" not in st.session_state:
     st.session_state.processed_keys = set()
 
 
-# -------------------------
-# Uploads
-# -------------------------
-uploaded_pdfs = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
-uploaded_excel = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
-uploaded_maps = st.file_uploader("Upload Account Maps Excel", type=["xlsx"])
+ # -------------------------
+ # Uploads (3 across)
+ # -------------------------
+u1, u2, u3 = st.columns(3)
+with u1:
+    uploaded_pdfs = st.file_uploader("Upload Invoice PDFs", type="pdf", accept_multiple_files=True)
+with u2:
+    uploaded_excel = st.file_uploader("Upload Consignment Summary Excel", type=["xlsx"])
+with u3:
+    uploaded_maps = st.file_uploader("Upload Account Maps Excel", type=["xlsx"])
 
 run = st.button(
     "Run Processing",
@@ -233,11 +237,16 @@ def _default_repack_allocations_for_key(k: str):
 def _allocations_df(k: str) -> pd.DataFrame:
     if k not in st.session_state.repack_allocations:
         st.session_state.repack_allocations[k] = _default_repack_allocations_for_key(k)
-    return pd.DataFrame(st.session_state.repack_allocations[k])
+    # Always return a DF with the expected columns, even if empty
+    return pd.DataFrame(st.session_state.repack_allocations[k], columns=["Grower", "Trays", "Repack"])
 
 
 def _save_allocations_df(k: str, df: pd.DataFrame):
     df = df.copy()
+    # Defensive: data_editor can return an empty DF with no columns
+    for col, default in {"Grower": "", "Trays": 0.0, "Repack": False}.items():
+        if col not in df.columns:
+            df[col] = default
     # Coerce types safely
     df["Grower"] = df["Grower"].astype(str).str.strip()
     df["Trays"] = pd.to_numeric(df["Trays"], errors="coerce").fillna(0.0)
@@ -276,7 +285,7 @@ def _process_repack_keys(keys_for_setup):
             skipped += 1
             continue
 
-        alloc_df = pd.DataFrame(st.session_state.repack_allocations.get(k, []))
+        alloc_df = pd.DataFrame(st.session_state.repack_allocations.get(k, []), columns=["Grower", "Trays", "Repack"])
         if alloc_df.empty:
             skipped += 1
             continue
@@ -294,7 +303,7 @@ def _process_repack_keys(keys_for_setup):
             continue
 
         grower_split = {r["Grower"]: float(r["Trays"]) / total for r in alloc_df.to_dict("records")}
-        repack_set = set(alloc_df[alloc_df.get("Repack", False)]["Grower"].tolist()) if "Repack" in alloc_df.columns else set()
+        repack_set = set(alloc_df[alloc_df["Repack"]]["Grower"].tolist()) if "Repack" in alloc_df.columns else set()
 
         rows, fail_reason = allocate(
             invoice_no, cust_po, charges, grower_split, company, invoice_date, mapping_df, repack_set
@@ -325,134 +334,139 @@ def _process_repack_keys(keys_for_setup):
 
 
 # -------------------------
-# Display results from session_state
+# Display results from session_state (2-column layout)
 # -------------------------
 all_rows = st.session_state.get("all_rows", [])
 failed_rows = st.session_state.get("failed_rows", [])
 
-# Success table + download
-if all_rows:
-    df_out = pd.DataFrame(all_rows)
-    df_export = group_with_blank_lines(df_out, "Supplier Invoice No.")
-    st.subheader("Processed Invoices")
-    st.dataframe(df_export, use_container_width=True)
-    txt = to_tab_delimited_with_header(df_export)
-    st.download_button("Download MYOB Import File", txt, "myob_import.txt", "text/plain")
-elif run:
-    st.info("No invoices were successfully processed.")
+left, right = st.columns([1.6, 1.0], gap="large")
 
+# -------------------------
+# LEFT: Processed + Failed
+# -------------------------
+with left:
+     # Success table + download
+     if all_rows:
+         df_out = pd.DataFrame(all_rows)
+         df_export = group_with_blank_lines(df_out, "Supplier Invoice No.")
+         st.subheader("Processed Invoices")
+         st.dataframe(df_export, use_container_width=True)
+         txt = to_tab_delimited_with_header(df_export)
+         st.download_button("Download MYOB Import File", txt, "myob_import.txt", "text/plain")
+     elif run:
+         st.info("No invoices were successfully processed.")
 
-# Failed table + actions
-if failed_rows:
-    st.subheader("Failed Invoices (With Reasons)")
+     # Failed table + actions
+     repack_keys, reprocess_keys = [], []
+     if failed_rows:
+         st.subheader("Failed Invoices (With Reasons)")
 
-    failed_df = pd.DataFrame(failed_rows)
+         failed_df = pd.DataFrame(failed_rows)
 
-    # Hide Key from display, but keep it in the data we carry around
-    display_df = failed_df.drop(columns=["Key"], errors="ignore").copy()
+         # Hide Key from display, but keep it in the data we carry around
+         display_df = failed_df.drop(columns=["Key"], errors="ignore").copy()
 
-    # Add "Actions" columns on the end (editable checkboxes)
-    if "Repack" not in display_df.columns:
-        display_df["Repack"] = False
-    if "Reprocess" not in display_df.columns:
-        display_df["Reprocess"] = False
+         # Add "Actions" columns on the end (editable checkboxes)
+         if "Repack" not in display_df.columns:
+             display_df["Repack"] = False
+         if "Reprocess" not in display_df.columns:
+             display_df["Reprocess"] = False
 
-    if "failed_actions_df" not in st.session_state:
-        st.session_state.failed_actions = {}
+         if "failed_actions" not in st.session_state:
+             st.session_state.failed_actions = {}
 
-    keys = failed_df["Key"].tolist()
+         keys = failed_df["Key"].tolist()
 
-    display_df["Repack"] = [
-        st.session_state.failed_actions.get(k, {}).get("Repack", False)
-        for k in keys
-    ]
-    display_df["Reprocess"] = [
-        st.session_state.failed_actions.get(k, {}).get("Reprocess", False)
-        for k in keys
-    ]
+         display_df["Repack"] = [
+             st.session_state.failed_actions.get(k, {}).get("Repack", False)
+             for k in keys
+         ]
+         display_df["Reprocess"] = [
+             st.session_state.failed_actions.get(k, {}).get("Reprocess", False)
+             for k in keys
+         ]
 
-    edited = st.data_editor(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Company", "Invoice No.", "PO No.", "Reason"],
-        key="failed_actions_editor"
-    )
+         edited = st.data_editor(
+             display_df,
+             use_container_width=True,
+             hide_index=True,
+             disabled=["Company", "Invoice No.", "PO No.", "Reason"],
+             key="failed_actions_editor",
+         )
 
-    for i, k in enumerate(keys):
-        st.session_state.failed_actions[k] = {
-            "Repack": bool(edited.loc[i, "Repack"]),
-            "Reprocess": bool(edited.loc[i, "Reprocess"]),
-        }
+         for i, k in enumerate(keys):
+             st.session_state.failed_actions[k] = {
+                 "Repack": bool(edited.loc[i, "Repack"]),
+                 "Reprocess": bool(edited.loc[i, "Reprocess"]),
+             }
 
-    repack_keys = [k for k in keys if st.session_state.failed_actions[k]["Repack"]]
-    reprocess_keys = [k for k in keys if st.session_state.failed_actions[k]["Reprocess"]]
+         repack_keys = [k for k in keys if st.session_state.failed_actions[k]["Repack"]]
+         reprocess_keys = [k for k in keys if st.session_state.failed_actions[k]["Reprocess"]]
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Apply Repack"):
-            st.session_state.show_repack_setup = True
-            st.session_state.repack_keys_snapshot = repack_keys
+         b1, b2 = st.columns(2)
+         with b1:
+             if st.button("Apply Repack"):
+                 st.session_state.show_repack_setup = True
+                 st.session_state.repack_keys_snapshot = repack_keys
+         with b2:
+             if st.button("Apply Reprocess (stub)"):
+                 st.info(f"Would reprocess {len(reprocess_keys)} invoice(s): {reprocess_keys}")
 
-    with c2:
-        if st.button("Apply Reprocess (stub)"):
-            st.info(f"Would reprocess {len(reprocess_keys)} invoice(s): {reprocess_keys}")
-            # TODO: queue these Keys for reprocess
+# -------------------------
+# RIGHT: Repack + Reprocess setup panels
+# -------------------------
+with right:
+     # -------------------------
+     # Repack Setup + processing
+     # -------------------------
+     if st.session_state.get("show_repack_setup", False):
+         st.subheader("Repack Setup")
 
-    # -------------------------
-    # Repack Setup + processing
-    # -------------------------
-    if st.session_state.get("show_repack_setup", False):
-        st.subheader("Repack Setup")
+         keys_for_setup = st.session_state.get("repack_keys_snapshot", repack_keys)
+         if not keys_for_setup:
+             st.info("No Invoices Selected")
+         else:
+             st.caption("Enter tray counts per grower. Percentages are calculated as trays / total trays entered.")
+             st.caption("Tick 'Repack' for growers that must hit the repack accounts. Unticked growers will use normal logistics/freight accounts.")
 
-        keys_for_setup = st.session_state.get("repack_keys_snapshot", repack_keys)
-        if not keys_for_setup:
-            st.info("No Invoices Selected")
-        else:
-            st.caption("Enter tray counts per grower. Percentages are calculated as trays / total trays entered.")
-            st.caption("Tick 'Repack' for growers that must hit the repack accounts. Unticked growers will use normal logistics/freight accounts.")
+             for k in keys_for_setup:
+                 meta = st.session_state.invoice_meta.get(k, {})
+                 if not meta:
+                     continue
 
-            for k in keys_for_setup:
-                meta = st.session_state.invoice_meta.get(k, {})
-                if not meta:
-                    continue
+                 header = f"{meta.get('Company','')} | Inv {meta.get('Invoice No.','')} | PO {meta.get('PO No.','')}"
+                 st.markdown(f"**{header}**")
 
-                header = f"{meta.get('Company','')} | Inv {meta.get('Invoice No.','')} | PO {meta.get('PO No.','')}"
-                st.markdown(f"**{header}**")
+                 inv_trays = meta.get("Invoice Trays", None)
+                 if isinstance(inv_trays, (int, float)) and inv_trays:
+                     st.caption(f"Invoice trays parsed: {int(round(inv_trays))}")
 
-                inv_trays = meta.get("Invoice Trays", None)
-                if isinstance(inv_trays, (int, float)) and inv_trays:
-                    st.caption(f"Invoice trays parsed: {int(round(inv_trays))}")
+                 df_alloc = _allocations_df(k)
 
-                df_alloc = _allocations_df(k)
+                 edited_alloc = st.data_editor(
+                     df_alloc,
+                     use_container_width=True,
+                     hide_index=True,
+                     num_rows="dynamic",
+                     key=f"repack_alloc_editor_{k}",
+                     column_config={
+                         "Grower": st.column_config.TextColumn("Grower"),
+                         "Trays": st.column_config.NumberColumn("Trays", min_value=0.0, step=1.0),
+                         "Repack": st.column_config.CheckboxColumn("Repack"),
+                     },
+                 )
 
-                # Editable allocations table
-                edited_alloc = st.data_editor(
-                    df_alloc,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    key=f"repack_alloc_editor_{k}",
-                    column_config={
-                        "Grower": st.column_config.TextColumn("Grower"),
-                        "Trays": st.column_config.NumberColumn("Trays", min_value=0.0, step=1.0),
-                        "Repack": st.column_config.CheckboxColumn("Repack"),
-                    },
-                )
+                 _save_allocations_df(k, edited_alloc)
 
-                # Save back to session_state
-                _save_allocations_df(k, edited_alloc)
+                 saved = pd.DataFrame(st.session_state.repack_allocations.get(k, []), columns=["Grower", "Trays", "Repack"])
+                 if not saved.empty:
+                     total = float(saved["Trays"].sum())
+                     saved["%"] = (saved["Trays"] / total).round(4)
+                     st.dataframe(saved[["Grower", "Trays", "%", "Repack"]], use_container_width=True, hide_index=True)
+                 else:
+                     st.info("Add growers and tray counts above (rows with 0 trays are ignored).")
 
-                # Show computed percentages
-                saved = pd.DataFrame(st.session_state.repack_allocations.get(k, []))
-                if not saved.empty:
-                    total = float(saved["Trays"].sum())
-                    saved["%"] = (saved["Trays"] / total).round(4)
-                    st.dataframe(saved[["Grower", "Trays", "%", "Repack"]], use_container_width=True, hide_index=True)
-                else:
-                    st.info("Add growers and tray counts above (rows with 0 trays are ignored).")
+                 st.divider()
 
-                st.divider()
-
-            if st.button("Process Repacks → Add to MYOB Export", type="primary"):
-                _process_repack_keys(keys_for_setup)
+             if st.button("Process Repacks → Add to MYOB Export", type="primary"):
+                 _process_repack_keys(keys_for_setup)
