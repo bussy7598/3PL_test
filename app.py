@@ -9,10 +9,14 @@ from exporter import group_with_blank_lines, to_tab_delimited_with_header
 from utils import load_consignee_state_map, norm_consignee
 from constants import GROWER_NAME
 
-st.set_page_config(
-    page_title = "Invoice Splitter For MYOB",
-    layout="wide",
-)
+
+st.set_page_config(page_title="Invoice Splitter for MYOB", layout="wide")
+
+st.markdown("""
+<style>
+  .block-container { max-width: 100%; padding-left: 3rem; padding-right: 3rem; }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("Invoice Splitter for MYOB")
 
@@ -54,6 +58,10 @@ if "all_rows" not in st.session_state:
 
 if "failed_rows" not in st.session_state:
     st.session_state.failed_rows = []
+
+if "all_growers" not in st.session_state:
+    # global grower list seen in the current run (used for dropdowns)
+    st.session_state.all_growers = set()
 
 if "mapping_df" not in st.session_state:
     st.session_state.mapping_df = None
@@ -120,6 +128,12 @@ if run and uploaded_pdfs and uploaded_excel and uploaded_maps:
                 continue
 
             grower_split, excel_trays, consignee = get_grower_split(uploaded_excel, cust_po, company)
+            # Track growers seen (for dropdowns in repack setup)
+            try:
+                st.session_state.all_growers.update({str(g).strip() for g in (grower_split or {}).keys() if str(g).strip()})
+            except Exception:
+                pass
+
 
             # Add growers + excel meta for repack UI
             st.session_state.invoice_meta[key].update({
@@ -262,6 +276,22 @@ def _save_allocations_df(k: str, df: pd.DataFrame):
 
     st.session_state.repack_allocations[k] = df.to_dict("records")
     st.session_state.repack_growers[k] = set(df[df["Repack"]]["Grower"].tolist())
+
+def _save_allocations_rows(k: str, rows: list[dict]):
+    """Save repack allocations from the Option-B UI (widgets per row)."""
+    cleaned = []
+    repack_set = set()
+    for r in (rows or []):
+        g = str(r.get("Grower", "")).strip()
+        trays = pd.to_numeric(r.get("Trays", 0), errors="coerce")
+        trays = float(trays) if pd.notna(trays) else 0.0
+        repack = bool(r.get("Repack", False))
+        cleaned.append({"Grower": g, "Trays": trays, "Repack": repack})
+        if g and trays > 0 and repack:
+            repack_set.add(g)
+    st.session_state.repack_allocations[k] = cleaned
+    st.session_state.repack_growers[k] = repack_set
+
 
 
 def _process_repack_keys(keys_for_setup):
@@ -446,32 +476,88 @@ with right:
                  if isinstance(inv_trays, (int, float)) and inv_trays:
                      st.caption(f"Invoice trays parsed: {int(round(inv_trays))}")
 
-                 df_alloc = _allocations_df(k)
+                 # Grower dropdown options (prefer growers found on this PO, fall back to all growers seen)
+                 grower_options = meta.get("Growers") or []
+                 if not grower_options:
+                     grower_options = sorted(st.session_state.get("all_growers", set()))
+                 # Ensure allocations exist in session
+                 if k not in st.session_state.repack_allocations:
+                     st.session_state.repack_allocations[k] = _default_repack_allocations_for_key(k)
+                 rows = list(st.session_state.repack_allocations.get(k, []))
+                 if not rows:
+                     rows = [{"Grower": "", "Trays": 0.0, "Repack": False}]
 
-                 edited_alloc = st.data_editor(
-                     df_alloc,
-                     use_container_width=True,
-                     hide_index=True,
-                     num_rows="dynamic",
-                     key=f"repack_alloc_editor_{k}",
-                     column_config={
-                         "Grower": st.column_config.TextColumn("Grower"),
-                         "Trays": st.column_config.NumberColumn("Trays", min_value=0.0, step=1.0),
-                         "Repack": st.column_config.CheckboxColumn("Repack"),
-                     },
-                 )
+                 # Header row
+                 h1, h2, h3, h4 = st.columns([5, 2, 1, 1])
+                 h1.markdown("**Grower**")
+                 h2.markdown("**Trays**")
+                 h3.markdown("**Repack**")
+                 h4.markdown("**Remove**")
 
-                 _save_allocations_df(k, edited_alloc)
+                 remove_at = None
+                 updated_rows = []
+                 for idx, r in enumerate(rows):
+                     c1, c2, c3, c4 = st.columns([5, 2, 1, 1])
+                     default_g = str(r.get("Grower","")).strip()
+                     # Keep current selection even if it is not in options
+                     options = list(grower_options)
+                     if default_g and default_g not in options:
+                         options = [default_g] + options
+                     grower = c1.selectbox(
+                         label="Grower",
+                         options=options if options else [""] ,
+                         index=(options.index(default_g) if (options and default_g in options) else 0),
+                         key=f"repack_{k}_grower_{idx}",
+                         label_visibility="collapsed",
+                     )
+                     trays = c2.number_input(
+                         label="Trays",
+                         min_value=0.0,
+                         step=1.0,
+                         value=float(r.get("Trays", 0.0) or 0.0),
+                         key=f"repack_{k}_trays_{idx}",
+                         label_visibility="collapsed",
+                     )
+                     repack_flag = c3.checkbox(
+                         label="Repack",
+                         value=bool(r.get("Repack", False)),
+                         key=f"repack_{k}_flag_{idx}",
+                         label_visibility="collapsed",
+                     )
+                     if c4.button("🗑️", key=f"repack_{k}_remove_{idx}"):
+                         remove_at = idx
+                     updated_rows.append({"Grower": str(grower).strip(), "Trays": float(trays), "Repack": bool(repack_flag)})
+
+                 # Remove row action
+                 if remove_at is not None:
+                     try:
+                         updated_rows.pop(remove_at)
+                     except Exception:
+                         pass
+                     _save_allocations_rows(k, updated_rows)
+                     st.rerun()
+
+                 a1, a2 = st.columns([1, 3])
+                 if a1.button("Add grower", key=f"repack_{k}_add"):
+                     default_new = {"Grower": (grower_options[0] if grower_options else ""), "Trays": 0.0, "Repack": False}
+                     updated_rows.append(default_new)
+                     _save_allocations_rows(k, updated_rows)
+                     st.rerun()
+
+                 # Save current edits
+                 _save_allocations_rows(k, updated_rows)
 
                  saved = pd.DataFrame(st.session_state.repack_allocations.get(k, []), columns=["Grower", "Trays", "Repack"])
-                 if not saved.empty:
-                     total = float(saved["Trays"].sum())
-                     saved["%"] = (saved["Trays"] / total).round(4)
-                     st.dataframe(saved[["Grower", "Trays", "%", "Repack"]], use_container_width=True, hide_index=True)
+                 saved = saved.copy()
+                 saved["Trays"] = pd.to_numeric(saved["Trays"], errors="coerce").fillna(0.0)
+                 saved["Grower"] = saved["Grower"].astype(str).str.strip()
+                 preview = saved[(saved["Grower"] != "") & (saved["Trays"] > 0)]
+                 if not preview.empty:
+                     total = float(preview["Trays"].sum())
+                     preview["%"] = (preview["Trays"] / total).round(4)
+                     st.dataframe(preview[["Grower", "Trays", "%", "Repack"]], use_container_width=True, hide_index=True)
                  else:
                      st.info("Add growers and tray counts above (rows with 0 trays are ignored).")
-
-                 st.divider()
 
              if st.button("Process Repacks → Add to MYOB Export", type="primary"):
                  _process_repack_keys(keys_for_setup)
